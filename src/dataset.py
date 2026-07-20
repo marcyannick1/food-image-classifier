@@ -1,55 +1,26 @@
 import os
+import random
+
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 
 # =====================================================
-# CLASSES
+# BINAIRE : hot_dog vs not_hot_dog
 # =====================================================
 
-def load_classes(dataset_path):
+POSITIVE_CLASS = "hot_dog"
+BINARY_CLASSES = ["not_hot_dog", "hot_dog"]
+
+
+def load_binary_split(dataset_path, split="train", negative_ratio=1.0, random_state=42):
     """
-    Charge les 101 classes du dataset.
+    Lit train.txt ou test.txt et construit un dataset binaire :
+    label 1 = hot_dog, label 0 = not_hot_dog.
 
-    Returns
-    -------
-    classes : list[str]
-    class_to_idx : dict
-    idx_to_class : dict
+    Les negatifs sont un echantillon aleatoire pioche parmi les 100
+    autres classes, de taille negative_ratio * nombre de positifs,
+    pour eviter un dataset desequilibre (750 hot_dog vs 75000 autres).
     """
-
-    classes_file = os.path.join(dataset_path, "meta", "classes.txt")
-
-    with open(classes_file, "r") as f:
-        classes = [line.strip() for line in f]
-
-    class_to_idx = {
-        class_name: idx
-        for idx, class_name in enumerate(classes)
-    }
-
-    idx_to_class = {
-        idx: class_name
-        for idx, class_name in enumerate(classes)
-    }
-
-    return classes, class_to_idx, idx_to_class
-
-
-# =====================================================
-# TRAIN / TEST SPLIT
-# =====================================================
-
-def load_split(dataset_path, split="train"):
-    """
-    Lit train.txt ou test.txt.
-
-    Returns
-    -------
-    image_paths : list
-    labels : list
-    """
-
-    classes, class_to_idx, _ = load_classes(dataset_path)
 
     split_file = os.path.join(
         dataset_path,
@@ -57,8 +28,8 @@ def load_split(dataset_path, split="train"):
         f"{split}.txt"
     )
 
-    image_paths = []
-    labels = []
+    positive_paths = []
+    negative_paths = []
 
     with open(split_file, "r") as f:
 
@@ -74,8 +45,19 @@ def load_split(dataset_path, split="train"):
                 line + ".jpg"
             )
 
-            image_paths.append(image_path)
-            labels.append(class_to_idx[class_name])
+            if class_name == POSITIVE_CLASS:
+                positive_paths.append(image_path)
+            else:
+                negative_paths.append(image_path)
+
+    n_negative = int(len(positive_paths) * negative_ratio)
+    negative_paths = random.Random(random_state).sample(
+        negative_paths,
+        n_negative
+    )
+
+    image_paths = positive_paths + negative_paths
+    labels = [1] * len(positive_paths) + [0] * len(negative_paths)
 
     return image_paths, labels
 
@@ -187,31 +169,61 @@ def build_dataset(
     return dataset
 
 
+def dataset_sizes(dataset_path, validation_size=0.2, negative_ratio=1.0):
+    """
+    Nombre d'images par split (train/val/test), sans decoder
+    la moindre image.
+    """
+
+    train_paths, train_labels = load_binary_split(
+        dataset_path,
+        "train",
+        negative_ratio
+    )
+
+    test_paths, _ = load_binary_split(
+        dataset_path,
+        "test",
+        negative_ratio
+    )
+
+    train_paths, val_paths, _, _ = split_train_validation(
+        train_paths,
+        train_labels,
+        validation_size
+    )
+
+    return len(train_paths), len(val_paths), len(test_paths)
+
+
 def load_datasets(
     dataset_path,
     image_size=(224, 224),
     batch_size=32,
     validation_size=0.2,
+    negative_ratio=1.0,
     cache=True,
 ):
     """
+    Charge le dataset binaire hot_dog / not_hot_dog.
+
     Retourne :
         train_ds
         val_ds
         test_ds
-        classes
+        classes  (["not_hot_dog", "hot_dog"])
     """
 
-    classes, _, _ = load_classes(dataset_path)
-
-    train_paths, train_labels = load_split(
+    train_paths, train_labels = load_binary_split(
         dataset_path,
-        "train"
+        "train",
+        negative_ratio
     )
 
-    test_paths, test_labels = load_split(
+    test_paths, test_labels = load_binary_split(
         dataset_path,
-        "test"
+        "test",
+        negative_ratio
     )
 
     (
@@ -256,5 +268,5 @@ def load_datasets(
         train_ds,
         val_ds,
         test_ds,
-        classes,
+        BINARY_CLASSES,
     )
