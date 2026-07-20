@@ -18,7 +18,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(APP_DIR)
 
 MODEL_PATH = os.environ.get(
-    "MODEL_PATH", os.path.join(ROOT_DIR, "models", "model.keras")
+    "MODEL_PATH", os.path.join(ROOT_DIR, "models", "best_model.keras")
 )
 CLASSES_PATH = os.path.join(ROOT_DIR, "data", "meta", "classes.txt")
 IMAGE_SIZE = (224, 224)
