@@ -1,12 +1,14 @@
-# 🍔 Food Image Classifier
+# 🌭 Hotdog / Not Hotdog
 
-Projet de Deep Learning visant à reconnaître automatiquement le type d'un plat à partir d'une image.
+Projet de Deep Learning visant à déterminer si une image de plat est un hotdog ou non (classification binaire), à partir d'un sous-ensemble du dataset Food-101.
 
 ---
 
 # Objectif
 
-Développer une application capable de classifier une image de nourriture parmi les 101 catégories du dataset Food-101.
+Développer une application capable de répondre à une seule question à partir d'une photo : **"est-ce un hotdog ?"**
+
+Le positif (`hot_dog`) vient de la classe `hot_dog` de Food-101 ; le négatif (`not_hot_dog`) est un échantillon équilibré tiré des 100 autres classes.
 
 L'objectif est de produire un modèle performant tout en restant suffisamment léger pour être intégré dans une application web.
 
@@ -29,14 +31,20 @@ L'objectif est de produire un modèle performant tout en restant suffisamment l�
       Global Average Pooling
                    │
                    ▼
-          Couche Dense (101 classes)
+              Dropout (0.2)
                    │
                    ▼
-             Softmax
+          Couche Dense (1 neurone)
                    │
                    ▼
-          Classe prédite
+             Sigmoid
+                   │
+                   ▼
+     Hotdog (>= 0.5) / Not Hotdog
 ```
+
+Sortie binaire (1 neurone + sigmoid), pas un softmax à 101 classes : le
+problème posé est "hotdog ou pas", pas "quel plat parmi 101".
 
 ## Pourquoi MobileNetV2 ?
 
@@ -64,17 +72,18 @@ https://www.kaggle.com/datasets/dansbecker/food-101
 
 ## Contenu
 
-- 101 catégories de plats
-- environ 1 000 images par classe
-- environ 101 000 images
+Food-101 fournit 101 catégories, mais nous n'en utilisons que 2 :
 
-Le dataset est organisé sous la forme :
+- `hot_dog` (positif) : toutes les images de cette classe
+- `not_hot_dog` (négatif) : un échantillon aléatoire tiré des 100 autres classes, de même taille que le positif, pour garder un dataset équilibré
+
+Le dataset complet est organisé sous la forme :
 
 ```
 images/
     pizza/
+    hot_dog/
     sushi/
-    burger/
     ...
 meta/
     classes.txt
@@ -83,45 +92,38 @@ meta/
     test.txt
 ```
 
-Chaque image est déjà classée dans son dossier correspondant.
+`src/dataset.py::load_binary_split()` lit `train.txt`/`test.txt`, isole les chemins `hot_dog`, et pioche aléatoirement (seed fixe) autant de négatifs parmi les autres classes.
 
 ---
 
 ## Répartition
 
-Le dataset fournit déjà un découpage officiel :
+Food-101 fournit un split officiel train/test (750/250 images par classe). Après filtrage binaire et équilibrage :
 
-- Train : 75 750 images
-- Test : 25 250 images
+- Train : 1 200 images (600 hot_dog + 600 not_hot_dog)
+- Validation : 300 images (20 % du train, split stratifié)
+- Test : 500 images (250 hot_dog + 250 not_hot_dog)
 
-Une partie du train sera utilisée comme validation (par exemple 80/20).
-
-Répartition envisagée :
-
-- Train : 60 %
-- Validation : 20 %
-- Test : 20 %
-
-Le split sera effectué de manière stratifiée afin de conserver une distribution équilibrée entre les classes.
+Le split train/validation est stratifié (`sklearn.model_selection.train_test_split`, `stratify=labels`) afin de garder 50/50 dans les deux sous-ensembles.
 
 ---
 
 # Prétraitement
 
-Les images subiront les transformations suivantes :
+Pipeline `src/dataset.py` (`tf.data`) :
 
 - Resize 224×224
-- Conversion en Tensor
-- Normalisation ImageNet
+- Normalisation en [0, 1] (`/255.0`), puis rescale en [-1, 1] dans le modèle (voir `src/model.py`), car MobileNetV2 attend cette plage
 
-Pendant l'entraînement :
+Augmentation (optionnelle, activée via `augment=True` dans `build_model()`) :
 
 - Random Horizontal Flip
-- Random Rotation
-- Random Crop
-- Color Jitter (si nécessaire)
+- Random Rotation (±10 %)
+- Random Zoom (±10 %)
 
-Ces augmentations permettront de limiter l'overfitting.
+Implémentée comme des couches Keras appliquées uniquement pendant `model.fit()` (pas en inférence), donc sans toucher au pipeline `tf.data`.
+
+**Résultat de la comparaison** (voir [Résultats](#résultats)) : sur ce dataset équilibré et de petite taille, l'augmentation n'a pas amélioré les performances — la config **sans augmentation** est retenue.
 
 ---
 
@@ -155,21 +157,22 @@ Learning rate initial :
 
 ## Loss Function
 
-CrossEntropyLoss
+Binary Crossentropy
 
-Adaptée à une classification multi-classe.
+Adaptée à une classification binaire (sortie sigmoid à 1 neurone).
 
 ---
 
 ## Métrique principale
 
-Accuracy Top-1
+Accuracy
+
+Baseline aléatoire pour un problème binaire équilibré : 50 %.
 
 Éventuellement :
 
-- Top-5 Accuracy
-- Matrice de confusion
-- Precision / Recall par classe
+- Matrice de confusion (2x2)
+- Precision / Recall
 
 ---
 
@@ -192,9 +195,31 @@ si la validation continue de progresser.
 
 ## Sauvegarde
 
-Le meilleur modèle sera sauvegardé selon :
+Le meilleur modèle est sauvegardé selon la meilleure validation accuracy, au format `.keras` dans `models/model.keras` (9,6 Mo, sous la limite GitHub de 100 Mo — pas besoin de Drive/Git LFS).
 
-- meilleure validation accuracy
+---
+
+# Résultats
+
+Deux configurations entraînées 8 epochs (MobileNetV2 gelé, tête entraînable uniquement), pour comparer l'effet de la data augmentation :
+
+| Configuration | Train acc | Val acc | Val loss | Test acc | Test loss | Temps |
+|---|---|---|---|---|---|---|
+| **Sans augmentation** (retenue) | 93.0 % | 91.0 % | 0.230 | **94.2 %** | 0.150 | 518 s |
+| Avec augmentation (flip/rotation/zoom) | 91.3 % | 90.3 % | 0.247 | 93.4 % | 0.185 | 621 s |
+
+La config **sans augmentation** est légèrement meilleure sur toutes les métriques, et plus rapide. Explication probable : le dataset est petit (1 200 images train) mais équilibré, et seule la tête (1 281 paramètres) est entraînée sur des features déjà génériques (ImageNet) — l'augmentation ajoute du bruit sans apporter de diversité utile ici. C'est ce modèle qui est sauvegardé dans `models/model.keras`.
+
+## Jalon qualité
+
+**Notre modèle bat-il le baseline aléatoire ?**
+Oui. Pour un problème binaire équilibré, le baseline aléatoire est à 50 %. Notre modèle atteint 94.2 % d'accuracy sur le test, très largement au-dessus.
+
+**Est-ce que la loss de validation est inférieure à la loss d'entraînement ?**
+Non, légèrement l'inverse (train loss 0.230 vs val loss finale du même ordre, écart train/val acc de 2 points). Ce n'est pas de l'overfitting significatif : avec seulement 1 281 paramètres entraînables (tête) sur une base gelée pré-entraînée, le modèle a peu de marge pour sur-apprendre le train. L'écart est resté stable sur les 8 epochs, sans divergence.
+
+**Quelle configuration a produit le meilleur résultat ? Pourquoi ?**
+Sans augmentation. Sur un petit dataset déjà équilibré avec une base gelée, l'augmentation n'apporte pas de bénéfice de généralisation ici — elle ralentit l'entraînement (+20 %) sans améliorer les métriques. L'augmentation serait plus utile avec un fine-tuning complet (base dégelée) ou un dataset plus petit/déséquilibré.
 
 ---
 
@@ -203,20 +228,18 @@ Le meilleur modèle sera sauvegardé selon :
 ```
 food-image-classifier/
 
-├── data/
-│── src/
-├──────dataset.py
-├──────model.py
-├──────train.py
-├──────predict.py
+├── data/                      # dataset Food-101 (non versionne, voir .gitignore)
+├── src/
+│   ├── dataset.py             # chargement + split binaire hot_dog/not_hot_dog
+│   ├── model.py                # MobileNetV2 transfer learning (build_model)
+│   └── train.py                # compile + fit (train)
 ├── models/
-│
+│   └── model.keras            # modele entraine (meilleure config)
 ├── notebooks/
-│
+│   └── 01_dataset_exploration.ipynb
 ├── webapp/
-│
+│   └── app.py                  # WebApp Streamlit
 ├── requirements.txt
-│
 └── README.md
 ```
 
