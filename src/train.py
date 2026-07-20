@@ -8,13 +8,13 @@ from src.dataset import load_datasets
 from src.model import build_model
 
 
-def train(dataset_path="data", epochs=10, batch_size=32):
+def train(dataset_path="data", epochs=10, batch_size=32, augment=False):
     train_ds, val_ds, test_ds, classes = load_datasets(
         dataset_path,
         batch_size=batch_size,
     )
 
-    model = build_model()
+    model = build_model(augment=augment)
 
     model.compile(
         optimizer="adam",
