@@ -135,13 +135,27 @@ def split_train_validation(
         val_labels,
     )
 
+
 def build_dataset(
     image_paths,
     labels,
-    image_size=(224,224),
+    image_size=(224, 224),
     batch_size=32,
     shuffle=True,
+    cache=True,
+    cache_path="",
 ):
+    """
+    Construit un tf.data.Dataset à partir de chemins d'images et de labels.
+
+    Ordre du pipeline :
+        1. from_tensor_slices  (paths, labels)
+        2. map                 (décodage/resize, coûteux)
+        3. cache                (évite de redécoder à chaque epoch)
+        4. shuffle              (rejoué à chaque epoch, en aval du cache)
+        5. batch
+        6. prefetch
+    """
 
     dataset = tf.data.Dataset.from_tensor_slices(
         (image_paths, labels)
@@ -156,17 +170,26 @@ def build_dataset(
         num_parallel_calls=tf.data.AUTOTUNE
     )
 
+    if cache:
+        # cache_path="" -> cache en RAM
+        # cache_path="/chemin/vers/fichier" -> cache sur disque
+        dataset = dataset.cache(cache_path)
+
     if shuffle:
-        dataset = dataset.shuffle(len(image_paths))
+        dataset = dataset.shuffle(
+            buffer_size=len(image_paths),
+            reshuffle_each_iteration=True
+        )
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
 
+
 def load_datasets(
     dataset_path,
-    image_size=(224,224),
+    image_size=(224, 224),
     batch_size=32,
     validation_size=0.2,
 ):
