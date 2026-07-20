@@ -169,6 +169,162 @@ def build_dataset(
     return dataset
 
 
+# =====================================================
+# IDENTIFICATION (101 classes) : modele secondaire, utilise
+# uniquement quand le binaire dit "not_hot_dog", pour indiquer
+# de quel plat il s'agit probablement.
+# =====================================================
+
+def load_classes(dataset_path):
+    """
+    Charge la liste des 101 classes de Food-101.
+    """
+
+    classes_file = os.path.join(dataset_path, "meta", "classes.txt")
+
+    with open(classes_file, "r") as f:
+        classes = [line.strip() for line in f]
+
+    class_to_idx = {
+        class_name: idx
+        for idx, class_name in enumerate(classes)
+    }
+
+    return classes, class_to_idx
+
+
+def load_multiclass_split(dataset_path, split="train", images_per_class=None, random_state=42):
+    """
+    Lit train.txt ou test.txt avec les 101 classes completes.
+
+    images_per_class limite le nombre d'images gardees par classe
+    (echantillonnage aleatoire stratifie) pour accelerer l'entrainement
+    du modele d'identification, dont le role est secondaire.
+    """
+
+    classes, class_to_idx = load_classes(dataset_path)
+
+    split_file = os.path.join(
+        dataset_path,
+        "meta",
+        f"{split}.txt"
+    )
+
+    paths_by_class = {class_name: [] for class_name in classes}
+
+    with open(split_file, "r") as f:
+
+        for line in f:
+
+            line = line.strip()
+
+            class_name = line.split("/")[0]
+
+            image_path = os.path.join(
+                dataset_path,
+                "images",
+                line + ".jpg"
+            )
+
+            paths_by_class[class_name].append(image_path)
+
+    rng = random.Random(random_state)
+
+    image_paths = []
+    labels = []
+
+    for class_name, paths in paths_by_class.items():
+
+        if images_per_class is not None and len(paths) > images_per_class:
+            paths = rng.sample(paths, images_per_class)
+
+        image_paths.extend(paths)
+        labels.extend([class_to_idx[class_name]] * len(paths))
+
+    return image_paths, labels, classes
+
+
+def load_identification_datasets(
+    dataset_path,
+    image_size=(224, 224),
+    batch_size=32,
+    validation_size=0.2,
+    images_per_class=50,
+    cache=True,
+):
+    """
+    Charge le dataset multi-classes (101 plats) pour le modele
+    d'identification secondaire.
+
+    Retourne :
+        train_ds
+        val_ds
+        test_ds
+        classes  (101 noms de plats)
+    """
+
+    train_paths, train_labels, classes = load_multiclass_split(
+        dataset_path,
+        "train",
+        images_per_class
+    )
+
+    test_images_per_class = None
+    if images_per_class is not None:
+        test_images_per_class = max(1, images_per_class // 3)
+
+    test_paths, test_labels, _ = load_multiclass_split(
+        dataset_path,
+        "test",
+        test_images_per_class
+    )
+
+    (
+        train_paths,
+        val_paths,
+        train_labels,
+        val_labels
+    ) = split_train_validation(
+        train_paths,
+        train_labels,
+        validation_size
+    )
+
+    train_ds = build_dataset(
+        train_paths,
+        train_labels,
+        image_size,
+        batch_size,
+        shuffle=True,
+        cache=cache,
+    )
+
+    val_ds = build_dataset(
+        val_paths,
+        val_labels,
+        image_size,
+        batch_size,
+        shuffle=False,
+        cache=cache,
+    )
+
+    test_ds = build_dataset(
+        test_paths,
+        test_labels,
+        image_size,
+        batch_size,
+        shuffle=False,
+        cache=cache,
+    )
+
+    return (
+        train_ds,
+        val_ds,
+        test_ds,
+        classes,
+    )
+
+
 def dataset_sizes(dataset_path, validation_size=0.2, negative_ratio=1.0):
     """
     Nombre d'images par split (train/val/test), sans decoder
