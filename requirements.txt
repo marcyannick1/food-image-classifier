@@ -1,4 +1,4 @@
 tensorflow
-tensorflow_datasets
-importlib_resources
 scikit-learn
+streamlit
+pillow
