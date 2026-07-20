@@ -204,17 +204,14 @@ Le meilleur modèle sera sauvegardé selon :
 food-image-classifier/
 
 ├── data/
-│── src/
+├── src/
 ├──────dataset.py
-├──────model.py
-├──────train.py
-├──────predict.py
 ├── models/
-│
+├──────best_model.keras
 ├── notebooks/
-│
+├──────01_dataset_exploration.ipynb
 ├── webapp/
-│
+├──────app.py
 ├── requirements.txt
 │
 └── README.md
@@ -224,9 +221,10 @@ food-image-classifier/
 
 # Web Application
 
-Une interface web permettra :
+Une application Streamlit (`webapp/app.py`) est disponible et fonctionnelle. Elle permet de :
 
-- charger une image
+- déposer/glisser une image (JPG / PNG)
+- charger automatiquement le modèle entraîné (`models/best_model.keras`)
 - lancer la prédiction
 - afficher :
 
@@ -235,14 +233,24 @@ Image
 
 ↓
 
-Classe prédite
+Classe prédite (avec un traitement spécial "Hotdog / Pas Hotdog")
 
 ↓
 
 Confiance (%)
+
+↓
+
+Top 5 des prédictions
 ```
 
-Une évolution possible serait d'afficher les 3 meilleures prédictions.
+Pour lancer l'application :
+
+```
+streamlit run webapp/app.py
+```
+
+Le chemin du modèle peut être surchargé via la variable d'environnement `MODEL_PATH`.
 
 ---
 
@@ -278,27 +286,27 @@ Ces décisions seront prises après les premiers entraînements.
 
 # Planning
 
-## Étape 1
+## Étape 1 ✅
 
 - Préparation du dataset
 - Vérification des classes
 - Création du DataLoader
 
-## Étape 2
+## Étape 2 ✅
 
 - Implémentation du modèle
 
-## Étape 3
+## Étape 3 ✅
 
-- Entraînement
+- Entraînement (modèle sauvegardé dans `models/best_model.keras`)
 
 ## Étape 4
 
 - Évaluation
 
-## Étape 5
+## Étape 5 ✅
 
-- Développement de la WebApp
+- Développement de la WebApp (Streamlit, `webapp/app.py`)
 
 ## Étape 6
 

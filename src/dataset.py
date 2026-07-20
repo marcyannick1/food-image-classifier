@@ -1,108 +1,17 @@
-import os
 import tensorflow as tf
-from sklearn.model_selection import train_test_split
-
-# =====================================================
-# CLASSES
-# =====================================================
-
-def load_classes(dataset_path):
-    """
-    Charge les 101 classes du dataset.
-
-    Returns
-    -------
-    classes : list[str]
-    class_to_idx : dict
-    idx_to_class : dict
-    """
-
-    classes_file = os.path.join(dataset_path, "meta", "classes.txt")
-
-    with open(classes_file, "r") as f:
-        classes = [line.strip() for line in f]
-
-    class_to_idx = {
-        class_name: idx
-        for idx, class_name in enumerate(classes)
-    }
-
-    idx_to_class = {
-        idx: class_name
-        for idx, class_name in enumerate(classes)
-    }
-
-    return classes, class_to_idx, idx_to_class
+import tensorflow_datasets as tfds
 
 
 # =====================================================
-# TRAIN / TEST SPLIT
+# PREPROCESSING
 # =====================================================
 
-def load_split(dataset_path, split="train"):
+def preprocess(image, label, image_size=(224, 224)):
     """
-    Lit train.txt ou test.txt.
-
-    Returns
-    -------
-    image_paths : list
-    labels : list
+    Redimensionne et normalise une image.
     """
-
-    classes, class_to_idx, _ = load_classes(dataset_path)
-
-    split_file = os.path.join(
-        dataset_path,
-        "meta",
-        f"{split}.txt"
-    )
-
-    image_paths = []
-    labels = []
-
-    with open(split_file, "r") as f:
-
-        for line in f:
-
-            line = line.strip()
-
-            class_name = line.split("/")[0]
-
-            image_path = os.path.join(
-                dataset_path,
-                "images",
-                line + ".jpg"
-            )
-
-            image_paths.append(image_path)
-            labels.append(class_to_idx[class_name])
-
-    return image_paths, labels
-
-
-# =====================================================
-# IMAGE LOADING
-# =====================================================
-
-def load_image(path, label, image_size=(224, 224)):
-    """
-    Charge une image et la prépare.
-    """
-
-    image = tf.io.read_file(path)
-
-    image = tf.image.decode_jpeg(
-        image,
-        channels=3
-    )
-
-    image = tf.image.resize(
-        image,
-        image_size
-    )
-
+    image = tf.image.resize(image, image_size)
     image = tf.cast(image, tf.float32) / 255.0
-
     return image, label
 
 
@@ -110,90 +19,60 @@ def load_image(path, label, image_size=(224, 224)):
 # TF.DATASET
 # =====================================================
 
-def split_train_validation(
-    image_paths,
-    labels,
-    validation_size=0.2,
-    random_state=42,
-):
-    """
-    Découpe le train en train + validation.
-    """
-
-    train_paths, val_paths, train_labels, val_labels = train_test_split(
-        image_paths,
-        labels,
-        test_size=validation_size,
-        random_state=random_state,
-        stratify=labels,
-    )
-
-    return (
-        train_paths,
-        val_paths,
-        train_labels,
-        val_labels,
-    )
-
-
 def build_dataset(
-    image_paths,
-    labels,
+    ds,
     image_size=(224, 224),
     batch_size=32,
     shuffle=True,
-    cache=True,
+    shuffle_buffer=1000,
+    cache=False,
     cache_path="",
 ):
     """
-    Construit un tf.data.Dataset à partir de chemins d'images et de labels.
-
-    Ordre du pipeline :
-        1. from_tensor_slices  (paths, labels)
-        2. map                 (décodage/resize, coûteux)
-        3. cache                (évite de redécoder à chaque epoch)
-        4. shuffle              (rejoué à chaque epoch, en aval du cache)
-        5. batch
-        6. prefetch
+    Applique le preprocessing + pipeline (cache/shuffle/batch/prefetch)
+    à un tf.data.Dataset issu de tfds.load().
     """
 
-    dataset = tf.data.Dataset.from_tensor_slices(
-        (image_paths, labels)
-    )
-
-    dataset = dataset.map(
-        lambda path, label: load_image(
-            path,
-            label,
-            image_size
-        ),
-        num_parallel_calls=tf.data.AUTOTUNE
+    ds = ds.map(
+        lambda image, label: preprocess(image, label, image_size),
+        num_parallel_calls=tf.data.AUTOTUNE,
     )
 
     if cache:
         # cache_path="" -> cache en RAM
         # cache_path="/chemin/vers/fichier" -> cache sur disque
-        dataset = dataset.cache(cache_path)
+        ds = ds.cache(cache_path)
 
     if shuffle:
-        dataset = dataset.shuffle(
-            buffer_size=len(image_paths),
-            reshuffle_each_iteration=True
+        ds = ds.shuffle(
+            buffer_size=shuffle_buffer,
+            reshuffle_each_iteration=True,
         )
 
-    dataset = dataset.batch(batch_size)
-    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    ds = ds.batch(batch_size)
+    ds = ds.prefetch(tf.data.AUTOTUNE)
 
-    return dataset
+    return ds
 
+
+# =====================================================
+# LOAD DATASETS
+# =====================================================
 
 def load_datasets(
-    dataset_path,
+    dataset_path=None,
     image_size=(224, 224),
     batch_size=32,
     validation_size=0.2,
 ):
     """
+    Charge Food-101 via tensorflow_datasets.
+
+    dataset_path : ignoré, gardé pour compatibilité avec les appels
+                   existants (ex. load_datasets("../data")).
+                   tfds télécharge et stocke les données dans
+                   ~/tensorflow_datasets/ par défaut.
+
     Retourne :
         train_ds
         val_ds
@@ -201,48 +80,37 @@ def load_datasets(
         classes
     """
 
-    classes, _, _ = load_classes(dataset_path)
+    # tfds ne fournit que "train" et "validation" (= test officiel).
+    # On découpe "train" en train/val selon validation_size.
+    val_pct = int(validation_size * 100)
+    train_split = f"train[{val_pct}%:]"
+    val_split = f"train[:{val_pct}%]"
 
-    train_paths, train_labels = load_split(
-        dataset_path,
-        "train"
+    (raw_train, raw_val, raw_test), info = tfds.load(
+        "food101",
+        split=[train_split, val_split, "validation"],
+        as_supervised=True,
+        with_info=True,
     )
 
-    test_paths, test_labels = load_split(
-        dataset_path,
-        "test"
-    )
-
-    (
-        train_paths,
-        val_paths,
-        train_labels,
-        val_labels
-    ) = split_train_validation(
-        train_paths,
-        train_labels,
-        validation_size
-    )
+    classes = info.features["label"].names
 
     train_ds = build_dataset(
-        train_paths,
-        train_labels,
+        raw_train,
         image_size,
         batch_size,
         shuffle=True,
     )
 
     val_ds = build_dataset(
-        val_paths,
-        val_labels,
+        raw_val,
         image_size,
         batch_size,
         shuffle=False,
     )
 
     test_ds = build_dataset(
-        test_paths,
-        test_labels,
+        raw_test,
         image_size,
         batch_size,
         shuffle=False,
