@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow_datasets as tfds
+from pathlib import Path
 
 
 # =====================================================
@@ -60,61 +61,42 @@ def build_dataset(
 # =====================================================
 
 def load_datasets(
-    dataset_path=None,
+    dataset_path,
     image_size=(224, 224),
     batch_size=32,
     validation_size=0.2,
 ):
-    """
-    Charge Food-101 via tensorflow_datasets.
+    dataset_path = Path(dataset_path)
 
-    dataset_path : ignoré, gardé pour compatibilité avec les appels
-                   existants (ex. load_datasets("../data")).
-                   tfds télécharge et stocke les données dans
-                   ~/tensorflow_datasets/ par défaut.
-
-    Retourne :
-        train_ds
-        val_ds
-        test_ds
-        classes
-    """
-
-    # tfds ne fournit que "train" et "validation" (= test officiel).
-    # On découpe "train" en train/val selon validation_size.
-    val_pct = int(validation_size * 100)
-    train_split = f"train[{val_pct}%:]"
-    val_split = f"train[:{val_pct}%]"
-
-    (raw_train, raw_val, raw_test), info = tfds.load(
-        "food101",
-        split=[train_split, val_split, "validation"],
-        as_supervised=True,
-        with_info=True,
-    )
-
-    classes = info.features["label"].names
-
-    train_ds = build_dataset(
-        raw_train,
-        image_size,
-        batch_size,
+    train_ds = tf.keras.utils.image_dataset_from_directory(
+        dataset_path,
+        validation_split=validation_size,
+        subset="training",
+        seed=42,
+        image_size=image_size,
+        batch_size=batch_size,
         shuffle=True,
     )
 
-    val_ds = build_dataset(
-        raw_val,
-        image_size,
-        batch_size,
+    val_ds = tf.keras.utils.image_dataset_from_directory(
+        dataset_path,
+        validation_split=validation_size,
+        subset="validation",
+        seed=42,
+        image_size=image_size,
+        batch_size=batch_size,
         shuffle=False,
     )
 
-    test_ds = build_dataset(
-        raw_test,
-        image_size,
-        batch_size,
-        shuffle=False,
-    )
+    classes = train_ds.class_names
+
+    AUTOTUNE = tf.data.AUTOTUNE
+
+    train_ds = train_ds.prefetch(AUTOTUNE)
+    val_ds = val_ds.prefetch(AUTOTUNE)
+
+    # Ici on utilise le jeu de validation comme test.
+    test_ds = val_ds
 
     return (
         train_ds,
